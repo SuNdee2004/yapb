@@ -988,26 +988,7 @@ void Bot::moveToGoal () {
 
    // press duck button if we need to
    if (m_pathFlags & NodeFlag::Crouch) {
-      bool pressDuck = true;
-
-      TraceResult tr {};
-
-      auto src = m_pathOrigin;
-      auto dst = m_pathOrigin;
-
-      src.z += 5.0f;
-      dst.z += 72.0f;
-
-      game.testHull (src, dst, TraceIgnore::Monsters, head_hull, ent (), &tr);
-
-      if (cr::fequal (tr.flFraction, 1.0f)) {
-         pressDuck = false;
-      }
-
-      // press duck if not canceled by visibility count check only and it's end of the route
-      if (pressDuck) {
-         pev->button |= IN_DUCK;
-      }
+      pev->button |= IN_DUCK;
    }
 
    // press jump button if we need to leave the ladder

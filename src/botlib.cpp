@@ -156,7 +156,7 @@ void Bot::checkBreakable (edict_t *touch) {
    }
    const bool hasEnemy = !game.isNullEntity (m_enemy);
 
-   // do n ot track for breakables if has some enemies
+   // do not track for breakables if has some enemies
    if (hasEnemy) {
       return;
    }
@@ -164,13 +164,24 @@ void Bot::checkBreakable (edict_t *touch) {
    if (game.isNullEntity (touch)) {
       auto breakable = lookupBreakable ();
 
-      m_breakableEntity = breakable;
-      m_breakableOrigin = game.getEntityOrigin (breakable);
+      if (!game.isNullEntity (breakable)) {
+         m_breakableEntity = breakable;
+         // m_breakableOrigin is already set to tr.vecEndPos in lookupBreakable()
+      }
+      else {
+         m_breakableEntity = nullptr;
+         m_breakableOrigin.clear ();
+      }
    }
    else {
       if (m_breakableEntity != touch) {
          m_breakableEntity = touch;
          m_breakableOrigin = game.getEntityOrigin (touch);
+         
+         // Adjust aim height for tables to avoid shooting under them
+         if (touch->v.size.z > 24.0f) {
+            m_breakableOrigin.z = touch->v.absmax.z - 12.0f;
+         }
       }
    }
 
@@ -198,7 +209,7 @@ void Bot::checkBreakablesAround () {
    }
    const auto radius = cv_object_destroy_radius.as <float> ();
 
-   // check if we're have some breakables in 400 units range
+   // check if we have some breakables in 400 units range
    for (const auto &breakable : game.getBreakables ()) {
       bool ignoreBreakable = false;
 
@@ -243,13 +254,25 @@ void Bot::checkBreakablesAround () {
          continue;
       }
 
-      if (isInFOV (origin - getEyesPos ()) < pev->fov && seesEntity (origin)) {
+      Vector breakableOrigin = origin;
+      TraceResult tr {};
+      game.testLine (getEyesPos (), origin, TraceIgnore::None, ent (), &tr);
+      
+      // Use exact trace hit point if possible, otherwise adjust for tall objects like tables
+      if (tr.flFraction < 1.0f && tr.pHit == breakable) {
+         breakableOrigin = tr.vecEndPos;
+      }
+      else if (breakable->v.size.z > 24.0f) {
+         breakableOrigin.z = breakable->v.absmax.z - 12.0f;
+      }
+
+      if (isInFOV (breakableOrigin - getEyesPos ()) < pev->fov && seesEntity (breakableOrigin)) {
          if (m_breakableEntity != breakable) {
             m_breakableTime = game.time ();
             m_lastBreakable = breakable;
          }
 
-         m_breakableOrigin = origin;
+         m_breakableOrigin = breakableOrigin;
          m_breakableEntity = breakable;
          m_campButtons = pev->button & IN_DUCK;
 
@@ -262,7 +285,7 @@ void Bot::checkBreakablesAround () {
 edict_t *Bot::lookupBreakable () {
    // this function checks if bot is blocked by a shoot able breakable in his moving direction
 
-   // we're got something already
+   // we've got something already
    if (game.isBreakableEntity (m_breakableEntity)) {
       return m_breakableEntity;
    }
@@ -277,7 +300,7 @@ edict_t *Bot::lookupBreakable () {
 
          // check if this isn't a triggered (bomb) breakable and if it takes damage. if true, shoot the crap!
          if (game.isBreakableEntity (hit)) {
-            m_breakableOrigin = game.getEntityOrigin (hit);
+            m_breakableOrigin = tr.vecEndPos; // Use the exact collision point
             m_breakableEntity = hit;
 
             return hit;
@@ -303,16 +326,17 @@ edict_t *Bot::lookupBreakable () {
       }
       return true;
    };
+   
    auto hit = doLookup (pev->origin, m_destOrigin, detectBreakableDistance);
-
    if (isGoodForUs (hit)) {
       return hit;
    }
+   
    hit = doLookup (getEyesPos (), m_destOrigin, detectBreakableDistance);
-
    if (isGoodForUs (hit)) {
       return hit;
    }
+   
    m_breakableEntity = nullptr;
    m_breakableOrigin.clear ();
 
