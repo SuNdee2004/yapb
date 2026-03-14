@@ -7,6 +7,7 @@
 
 #include <yapb.h>
 
+ConVar cv_dont_shoot ("dont_shoot", "0", "Bots will not shoot enemies while they are aiming at them.");
 ConVar cv_shoots_thru_walls ("shoots_thru_walls", "2", "Specifies whether bots are able to fire at enemies behind the wall, if they hear or suspect them.", true, 0.0f, 3.0f);
 ConVar cv_ignore_enemies ("ignore_enemies", "0", "Enables or disables searching the world for enemies.");
 ConVar cv_check_enemy_rendering ("check_enemy_rendering", "0", "Enables or disables checking enemy rendering flags. Useful for some mods.");
@@ -1161,6 +1162,11 @@ void Bot::handleWeapons (float distance, int, int id, int choosen) {
       }
    }
    const float timeDelta = game.time () - m_frameInterval;
+
+   if (cv_dont_shoot) {
+      m_shootTime = timeDelta + 0.5f; // Push shoot time forward so the bot doesn't spam checks
+      return; 
+   }
 
    // need to care for burst fire?
    if ((distance < kSprayDistance && !isRecoilHigh ()) || m_blindTime > game.time () || usesKnife ()) {

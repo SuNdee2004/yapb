@@ -14,6 +14,7 @@ ConVar cv_camping_time_min ("camping_time_min", "15.0", "Lower bound of time fro
 ConVar cv_camping_time_max ("camping_time_max", "45.0", "Upper bound of time until which the time for camping is calculated.", true, 15.0f, 120.0f);
 
 ConVar cv_random_knife_attacks ("random_knife_attacks", "1", "Allows or disallows the ability for random knife attacks when the bot is rushing and no enemy is nearby.");
+ConVar cv_smoke_defusing ("smoke_defusing", "1", "Enables CT bots to throw smoke on the planted bomb before defusing when enemies are alive.");
 
 void Bot::normal_ () {
    m_aimFlags |= AimFlags::Nav;
@@ -990,7 +991,67 @@ void Bot::defuseBomb_ () {
    m_destOrigin = bombPos;
    m_entity = bombPos;
 
-   pev->button |= IN_USE;
+   if (cv_smoke_defusing && !m_hasProgressBar && m_numEnemiesLeft > 0) {
+      // Deploy smoke whether enemies are currently seen or hidden
+      if (bestGrenadeCarried () == Weapon::Smoke) {
+         if (m_currentWeapon != Weapon::Smoke) {
+            selectWeaponById (Weapon::Smoke);
+            m_duckDefuseCheckTime = game.time () + 1.5f; // Wait for weapon switch
+            
+            // Aim straight down at the bomb to deploy smoke directly on it
+            m_aimFlags |= AimFlags::Override;
+            m_lookAtSafe = bombPos;
+         }
+         else if (m_duckDefuseCheckTime < game.time ()) {
+             if (!(m_oldButtons & IN_ATTACK)) {
+               pev->button |= IN_ATTACK; // Throw the smoke
+               
+               // Wait for throw animation AND for the smoke to actually bloom (~3.0 seconds)
+               m_duckDefuseCheckTime = game.time () + 3.0f; 
+             }
+         }
+         
+         m_moveSpeed = 0.0f;
+         m_strafeSpeed = 0.0f;
+         return; // Delay the actual defuse until the smoke is thrown
+      }
+      else {
+         // If we recently threw a smoke grenade, delay defusing until it blooms
+         if (m_duckDefuseCheckTime > game.time () && !(m_oldButtons & IN_USE)) {
+            m_moveSpeed = 0.0f;
+            m_strafeSpeed = 0.0f;
+            
+            m_aimFlags |= AimFlags::Override;
+            m_lookAtSafe = bombPos;
+            
+            pev->button |= IN_DUCK; // Crouch while waiting for smoke to pop
+            return;
+         }
+
+         // Find another CT bot to deploy smoke and provide protection
+         for (const auto &bot : bots) {
+            if (bot->m_isAlive && bot->m_team == Team::CT && bot.get () != this) {
+               if (bot->bestGrenadeCarried () == Weapon::Smoke && bot->getCurrentTaskId () != Task::ThrowSmoke) {
+                  // Assign the throw smoke task aiming at the bomb
+                  bot->m_throw = bombPos;
+                  bot->startTask (Task::ThrowSmoke, TaskPri::Throw, kInvalidNodeIndex, game.time () + 3.0f, false);
+
+                  // Provide protection by finding a defend node around the bomb
+                  const int defendNode = bot->findDefendNode (bombPos);
+                  bot->startTask (Task::Camp, TaskPri::Camp, kInvalidNodeIndex, game.time () + 15.0f, true);
+                  bot->startTask (Task::MoveToPosition, TaskPri::MoveToPosition, defendNode, game.time () + 5.0f, true);
+                  
+                  break; // We only need one bot to assist
+               }
+            }
+         }
+      }
+   }
+
+   // Only press use if we aren't currently waiting for a smoke to be thrown
+   if (m_duckDefuseCheckTime < game.time () || m_hasProgressBar) {
+      pev->button |= IN_USE;
+   }
 
    // if defusing is not already started, maybe crouch before
    if (!m_hasProgressBar && m_duckDefuseCheckTime < game.time ()) {
